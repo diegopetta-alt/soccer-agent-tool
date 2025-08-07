@@ -34,7 +34,6 @@
     function startExtraction() {
       stopRequested = false;
 
-      // Leggi i parametri inseriti dall'utente
       let playerId = parseInt(document.getElementById("startId").value) || parseInt(localStorage.getItem('playerId')) || 1;
       const minRatio = parseFloat(document.getElementById("minRatio").value) || 0;
 
@@ -45,18 +44,20 @@
         }
 
         try {
-          const url = `https://corsproxy.io/?https://api.soccerverse.io/players/detailed?player_id=${id}`;
-          const response = await fetch(url);
+          const apiUrl = `https://api.soccerverse.io/players/detailed?player_id=${id}`;
+          const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(apiUrl)}`;
+
+          const response = await fetch(proxyUrl);
           if (!response.ok) throw new Error("Errore nella risposta");
 
-          const data = await response.json();
+          const proxyData = await response.json();
+          const data = JSON.parse(proxyData.contents);
 
           if (data && data.agent === null && data.salary && data.value) {
             const ratio = data.salary / data.value;
 
             if (ratio >= minRatio) {
               log(`✅ ID ${id} - ${data.name} | Ratio: ${ratio.toFixed(4)} ✅`);
-              // Puoi anche salvarli in array per download o uso successivo
             } else {
               log(`ℹ️  ID ${id} - Ratio troppo basso: ${ratio.toFixed(4)}`);
             }
@@ -64,15 +65,11 @@
             log(`🚫 ID ${id} - Ha agente o dati incompleti`);
           }
 
-          // Salva progressi
           localStorage.setItem('playerId', id + 1);
-
-          // Prossimo
-          setTimeout(() => processPlayer(id + 1), 400);
+          setTimeout(() => processPlayer(id + 1), 500);
 
         } catch (e) {
           log(`❌ Errore per ID ${id}: ${e.message}`);
-          // Salta comunque al prossimo
           setTimeout(() => processPlayer(id + 1), 1000);
         }
       }
