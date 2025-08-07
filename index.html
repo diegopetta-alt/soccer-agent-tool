@@ -7,12 +7,20 @@
 <body>
 
   <h1>Estrazione giocatori senza agente</h1>
-  
+
+  <label for="startId">ID iniziale:</label>
+  <input type="number" id="startId" placeholder="es. 1" />
+
+  <label for="minRatio">Min Ratio (stipendio / valore):</label>
+  <input type="number" step="0.01" id="minRatio" placeholder="es. 0.02" />
+
+  <br><br>
+
   <button onclick="startExtraction()">▶️ Avvia Estrazione</button>
   <button onclick="stopExtraction()">⏹️ Ferma</button>
   <button onclick="resetProgress()">🔄 Resetta</button>
 
-  <div id="log" style="margin-top: 20px; white-space: pre-wrap;"></div>
+  <div id="log" style="margin-top: 20px; white-space: pre-wrap; font-family: monospace; max-height: 400px; overflow-y: auto;"></div>
 
   <script>
     let stopRequested = false;
@@ -25,7 +33,10 @@
 
     function startExtraction() {
       stopRequested = false;
-      let playerId = parseInt(localStorage.getItem('playerId')) || 1;
+
+      // Leggi i parametri inseriti dall'utente
+      let playerId = parseInt(document.getElementById("startId").value) || parseInt(localStorage.getItem('playerId')) || 1;
+      const minRatio = parseFloat(document.getElementById("minRatio").value) || 0;
 
       async function processPlayer(id) {
         if (stopRequested) {
@@ -34,28 +45,34 @@
         }
 
         try {
-          // Sostituisci con il tuo proxy reale qui
-          const response = await fetch(`https://your-proxy.com/players/detailed?player_id=${id}`);
+          const url = `https://corsproxy.io/?https://api.soccerverse.io/players/detailed?player_id=${id}`;
+          const response = await fetch(url);
           if (!response.ok) throw new Error("Errore nella risposta");
 
           const data = await response.json();
 
-          if (data.agent === null) {
-            log(`✅ Giocatore senza agente trovato! ID: ${id} | Nome: ${data.name}`);
-            // Qui puoi anche salvarlo o aggiungerlo alla tua lista
+          if (data && data.agent === null && data.salary && data.value) {
+            const ratio = data.salary / data.value;
+
+            if (ratio >= minRatio) {
+              log(`✅ ID ${id} - ${data.name} | Ratio: ${ratio.toFixed(4)} ✅`);
+              // Puoi anche salvarli in array per download o uso successivo
+            } else {
+              log(`ℹ️  ID ${id} - Ratio troppo basso: ${ratio.toFixed(4)}`);
+            }
           } else {
-            log(`🚫 Giocatore con agente - ID: ${id}`);
+            log(`🚫 ID ${id} - Ha agente o dati incompleti`);
           }
 
-          // Salva il prossimo ID nel localStorage
+          // Salva progressi
           localStorage.setItem('playerId', id + 1);
 
-          // Continua con il prossimo dopo breve pausa
+          // Prossimo
           setTimeout(() => processPlayer(id + 1), 400);
 
         } catch (e) {
           log(`❌ Errore per ID ${id}: ${e.message}`);
-          // Salta al prossimo dopo errore
+          // Salta comunque al prossimo
           setTimeout(() => processPlayer(id + 1), 1000);
         }
       }
@@ -69,7 +86,7 @@
 
     function resetProgress() {
       localStorage.removeItem('playerId');
-      log("🔄 Progressi azzerati. Si ripartirà da ID 1.");
+      log("🔄 Progressi azzerati. Si ripartirà da ID specificato.");
     }
   </script>
 
