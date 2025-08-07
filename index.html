@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <title>Giocatori senza agente + Factor</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 15px; font-size: 15px; }
+    #output, #results { border: 1px solid #ccc; padding: 10px; margin-top: 10px; max-height: 300px; overflow-y: auto; font-size: 13px; }
+    .player-item { padding: 8px; border-bottom: 1px solid #ddd; }
+    .player-item a { text-decoration: none; color: #0645AD; font-weight: bold; margin-right: 6px; }
+    .player-item a:hover { text-decoration: underline; }
+    .input-prezzo { width: 70px; margin-left: 5px; font-size: 13px; }
+    .ratio-box { display: inline-block; margin-left: 10px; font-weight: bold; font-size: 13px; }
+    button { margin-top: 10px; padding: 6px 10px; font-size: 14px; font-weight: bold; cursor: pointer; }
+    label { font-weight: bold; font-size: 14px; }
+    input[type="number"] { width: 80px; padding: 4px; font-size: 14px; }
+    .remove-btn { margin-left: 10px; background: #e33; color: #fff; border: none; padding: 4px 6px; cursor: pointer; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h2>Giocatori senza agente + Factor</h2>
+
+  <label for="startId">ID iniziale: </label>
+  <input type="number" id="startId" value="1" min="1" />
+  <label for="minRatio">Ratio min (wages/value): </label>
+  <input type="number" step="0.01" id="minRatio" value="0" min="0" />
+  <button id="startBtn">Avvia</button>
+  <button id="stopBtn">Stop</button>
+
+  <div id="output">Premi "Avvia" per iniziare.</div>
+  <h3>Risultati:</h3>
+  <div id="results"></div>
+
+  <script>
+    const output = document.getElementById("output");
+    const results = document.getElementById("results");
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const minRatioInput = document.getElementById("minRatio");
+    const startIdInput = document.getElementById("startId");
+
+    let currentId = 1;
+    let consecutiveFailures = 0;
+    const maxConsecutiveFailures = 50;
+    const maxPlayers = 140000;
+    let running = false;
+
+    function log(msg, isError = false) {
+      const div = document.createElement("div");
+      div.textContent = msg;
+      if (isError) div.style.color = "red";
+      output.appendChild(div);
+      output.scrollTop = output.scrollHeight;
+      if (output.childNodes.length > 500) {
+        output.removeChild(output.firstChild);
+      }
+    }
+
+    async function fetchPlayer(id) {
+      const url = `https://services.soccerverse.com/api/players/detailed?page=1&per_page=20&sort_by=last_price&sort_order=asc&player_id=${id}`;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP status ${res.status}`);
+        const data = await res.json();
+        if (!data.items || data.items.length === 0) return null;
+        return data.items[0];
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function computeFactor(wages) {
+      const bonusInf = wages * 0.0000002;
+      const bonusPresenza = bonusInf / 2;
+      const bonusGol = bonusPresenza / 10 * 7;
+      const bonusAgente = bonusInf / 100;
+      const factor = ((1 / 1000000) * (bonusInf + bonusPresenza + bonusGol + bonusAgente) * 35);
+      return factor;
+    }
+
+    function addPlayerToResults(player, ratio, factor) {
+      const div = document.createElement("div");
+      div.classList.add("player-item");
+
+      const linkSV = document.createElement("a");
+      linkSV.href = `https://play.soccerverse.com/player/${player.player_id}`;
+      linkSV.target = "playerWindow";
+      linkSV.textContent = `${player.player_id} - Soccerverse`;
+
+      const linkSR = document.createElement("a");
+      linkSR.href = `https://soccerratings.org/player/${player.player_id}`;
+      linkSR.target = "ratingsWindow";
+      linkSR.textContent = "[SR]";
+
+      const info = document.createElement("div");
+      info.innerHTML = `
+        Ratio: ${ratio.toFixed(3)} | Value: ${player.value} | Wages: ${player.wages} |
+        €: <input type="number" step="0.0001" class="input-prezzo" />
+        <span class="ratio-box">/Factor: -</span>
+        <button class="remove-btn">X</button>
+      `;
+
+      const inputPrezzo = info.querySelector(".input-prezzo");
+      const ratioBox = info.querySelector(".ratio-box");
+      const removeBtn = info.querySelector(".remove-btn");
+
+      inputPrezzo.addEventListener("input", () => {
+        const prezzo = parseFloat(inputPrezzo.value);
+        if (!isNaN(prezzo) && factor !== 0) {
+          const result = prezzo / factor;
+          ratioBox.textContent = `/Factor: ${result.toFixed(2)}`;
+        } else {
+          ratioBox.textContent = `/Factor: -`;
+        }
+      });
+
+      removeBtn.addEventListener("click", () => {
+        results.removeChild(div);
+      });
+
+      div.appendChild(linkSV);
+      div.appendChild(linkSR);
+      div.appendChild(info);
+      results.appendChild(div);
+    }
+
+    async function run() {
+      if (running) return;
+      running = true;
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      results.innerHTML = "";
+      output.innerHTML = "";
+
+      const minRatio = parseFloat(minRatioInput.value);
+      currentId = parseInt(startIdInput.value);
+
+      if (isNaN(minRatio) || minRatio < 0 || isNaN(currentId) || currentId < 1) {
+        alert("Valori non validi.");
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        running = false;
+        return;
+      }
+
+      log(`Inizio da ID ${currentId} | Min Ratio = ${minRatio}`);
+
+      while (currentId <= maxPlayers && consecutiveFailures < maxConsecutiveFailures && running) {
+        const player = await fetchPlayer(currentId);
+
+        if (player === null) {
+          log(`❌ Nessun dato per ID ${currentId}`);
+          consecutiveFailures++;
+        } else {
+          log(`🔍 Analizzo ID ${currentId}...`);
+          consecutiveFailures = 0;
+          const noAgent = !player.agent_name || player.agent_name.trim() === "";
+          if (player.value > 0 && noAgent) {
+            const ratio = player.wages / player.value;
+            if (ratio >= minRatio) {
+              const factor = computeFactor(player.wages);
+              addPlayerToResults(player, ratio, factor);
+              log(`✔️ ${player.player_id} - ${player.name} | Ratio: ${ratio.toFixed(2)}`);
+            }
+          }
+        }
+
+        currentId++;
+        await new Promise(r => setTimeout(r, 200));
+      }
+
+      log(running ? "✅ Fine estrazione." : "🛑 Interrotto.");
+      running = false;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+
+    startBtn.addEventListener("click", run);
+    stopBtn.addEventListener("click", () => {
+      running = false;
+      stopBtn.disabled = true;
+    });
+  </script>
+</body>
+</html>
